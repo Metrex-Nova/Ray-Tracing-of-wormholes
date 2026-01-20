@@ -1,0 +1,74 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.integrate import solve_ivp
+
+np.seterr(over='ignore', divide='ignore', invalid='ignore')
+
+rc = 1.0
+rho_c = 15e-3
+alpha = 0.09051
+r0 = 0.1
+r_start = 10.0
+
+def Phi_soliton(r):
+    r = np.maximum(r, r0 + 1e-8)
+    coeff = (np.pi * rho_c * rc**3) / (53760 * alpha**1.5)
+    term_atan = 3465 * np.arctan(np.sqrt(alpha) * r) / r
+    num = (np.sqrt(alpha) * (3465*alpha**5*r**10 + 19635*alpha**4*r**8 +
+            45738*alpha**3*r**6 + 55638*alpha**2*r**4 + 36685*alpha*r**2 + 11895))
+    den = (alpha*r**2 + 1)**6
+    return coeff * (-num/den - term_atan)
+
+def b_soliton(r):
+    r = np.maximum(r, r0)
+    term1 = (rho_c * r * (3465*alpha**6*r**12 + 23100*alpha**5*r**10 +
+             65373*alpha**4*r**8 + 101376*alpha**3*r**6 + 92323*alpha**2*r**4 +
+             48580*alpha*r**2 - 3465)) / (alpha * (alpha*r**2 + 1)**7)
+    term2 = (3465 * rho_c * (np.arctan(np.sqrt(alpha)*r) -
+             np.arctan(np.sqrt(alpha)*r0))) / alpha**1.5
+    return (1/215040) * (term1 + term2 + r0*215040)
+
+def rhs(l, y, b_impact):
+    r, phi = y
+    if r <= r0 + 1e-5:
+        return [0, 0]
+    Ph = Phi_soliton(r)
+    exp_factor = np.exp(np.clip(-2.0 * Ph, -100, 100))
+    V_eff = (1.0 - b_soliton(r)/r) * (exp_factor - (b_impact**2/r**2))
+    drdl = -np.sqrt(max(0, V_eff))
+    dphidl = b_impact / r**2
+    return [drdl, dphidl]
+
+def stop_tp(l, y, b_impact):
+    return np.exp(np.clip(-2.0 * Phi_soliton(y[0]), -100, 100)) - (b_impact**2/y[0]**2)
+
+stop_tp.terminal = True
+stop_tp.direction = -1
+
+b_crit = r0 / np.exp(np.clip(Phi_soliton(r0), -50, 50))
+b_span = np.linspace(0.1, 1.5, 50)
+
+plt.figure(figsize=(10, 10))
+
+for b in b_span:
+    r_init = np.sqrt(r_start**2 + b**2)
+    phi_init = np.arctan2(b, r_start)
+
+    sol = solve_ivp(rhs, [0, 5000], [r_init, phi_init], args=(b,), events=stop_tp, rtol=1e-8)
+    r_p, p_p = sol.y[0], sol.y[1]
+
+    if sol.t_events[0].size > 0:
+        p_exit = 2*p_p[-1] - p_p[::-1]
+        r_tot = np.concatenate([r_p, r_p[::-1]])
+        p_tot = np.concatenate([p_p, p_exit])
+        plt.plot(r_tot*np.cos(p_tot), r_tot*np.sin(p_tot), 'r-', alpha=0.3)
+    else:
+        plt.plot(r_p*np.cos(p_p), r_p*np.sin(p_p), 'k-', alpha=0.2)
+
+plt.gca().add_artist(plt.Circle((0, 0), r0, color='purple', fill=True, alpha=0.3))
+plt.xlim(-5, 5)
+plt.ylim(-5, 5)
+plt.gca().set_aspect('equal')
+plt.title("Ray tracing of static soliton wormhole")
+plt.grid(alpha=0.2)
+plt.show()
