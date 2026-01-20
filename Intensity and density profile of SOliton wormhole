@@ -1,0 +1,84 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.integrate import solve_ivp, trapezoid
+
+np.seterr(over='ignore', divide='ignore', invalid='ignore')
+
+rc = 1.0
+rho_c = 15e-3
+alpha = 0.09051
+r0 = 0.1
+r_start = 10.0
+
+def Phi_soliton(r):
+    r = np.maximum(r, r0 + 1e-8)
+    coeff = (np.pi * rho_c * rc**3) / (53760 * alpha**1.5)
+    term_atan = 3465 * np.arctan(np.sqrt(alpha) * r) / r
+    num = (np.sqrt(alpha) * (3465*alpha**5*r**10 + 19635*alpha**4*r**8 +
+            45738*alpha**3*r**6 + 55638*alpha**2*r**4 + 36685*alpha*r**2 + 11895))
+    den = (alpha*r**2 + 1)**6
+    return coeff * (-num/den - term_atan)
+
+def b_soliton(r):
+    r = np.maximum(r, r0)
+    term1 = (rho_c * r * (3465*alpha**6*r**12 + 23100*alpha**5*r**10 +
+             65373*alpha**4*r**8 + 101376*alpha**3*r**6 + 92323*alpha**2*r**4 +
+             48580*alpha*r**2 - 3465)) / (alpha * (alpha*r**2 + 1)**7)
+    term2 = (3465 * rho_c * (np.arctan(np.sqrt(alpha)*r) -
+             np.arctan(np.sqrt(alpha)*r0))) / alpha**1.5
+    return (1/215040) * (term1 + term2 + r0*215040)
+
+def get_intensity(b_impact):
+    r_init = np.sqrt(r_start**2 + b_impact**2)
+    phi_init = np.arctan2(b_impact, r_start)
+
+    def rhs(l, y):
+        r, phi = y
+        if r <= r0 + 1e-5:
+            return [0, 0]
+        Ph = Phi_soliton(r)
+        exp_factor = np.exp(np.clip(-2.0 * Ph, -100, 100))
+        V_eff = (1.0 - b_soliton(r)/r) * (exp_factor - (b_impact**2/r**2))
+        return [-np.sqrt(max(0, V_eff)), b_impact / r**2]
+
+    def stop_tp(l, y):
+        return np.exp(np.clip(-2.0 * Phi_soliton(y[0]), -100, 100)) - (b_impact**2/y[0]**2)
+
+    stop_tp.terminal = True
+    stop_tp.direction = -1
+
+    sol = solve_ivp(rhs, [0, 5000], [r_init, phi_init], events=stop_tp, rtol=1e-8)
+
+    if sol.t_events[0].size > 0:
+        r_path = sol.y[0]
+        phi_path = sol.y[1]
+        integrand = np.exp(3.0 * Phi_soliton(r_path))
+        return 2.0 * trapezoid(integrand, phi_path)
+    else:
+        return 0.0
+
+b_vals = np.linspace(0.01, 2.0, 100)
+intensities = np.array([get_intensity(b) for b in b_vals])
+intensities /= np.max(intensities)
+
+fig = plt.figure(figsize=(16, 7))
+
+ax1 = fig.add_subplot(1, 2, 1)
+ax1.plot(b_vals, intensities, color='black', lw=2)
+ax1.set_xlabel(r"Impact Parameter $\tilde{b}$")
+ax1.set_ylabel(r"Intensity $I(\tilde{b})$")
+ax1.set_title("Soliton Intensity Profile")
+ax1.grid(True, alpha=0.3)
+
+ax2 = fig.add_subplot(1, 2, 2, projection='polar')
+theta = np.linspace(0, 2*np.pi, 100)
+B, T = np.meshgrid(b_vals, theta)
+Z = np.tile(intensities, (100, 1))
+
+pc = ax2.pcolormesh(T, B, Z, cmap='inferno', shading='auto')
+ax2.set_yticklabels([])
+ax2.set_title("Soliton Shadow Density Map")
+plt.colorbar(pc, ax=ax2, label='Normalized Intensity')
+
+plt.tight_layout()
+plt.show()
