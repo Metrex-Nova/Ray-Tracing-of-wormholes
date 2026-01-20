@@ -1,0 +1,73 @@
+import numpy as np
+from scipy.integrate import solve_ivp
+import matplotlib.pyplot as plt
+
+rs, rho_s, r0 = 1.447, 3.11e-3, 1.0  
+r_max = 15.0  
+
+def Phi_your_model(r):
+    return -(4*np.pi*rho_s*rs**3*(np.log(r+rs) - np.log(rs))) / r
+
+def b_your_model(r):
+    return (r0 + rho_s * rs**3 * (rs / (r + rs) + np.log(r + rs)) - 
+            rho_s * rs**3 * (rs / (rs + r0) + np.log(rs + r0)))
+
+def geodesic_rhs(lmbda, y, btilde):
+    r, phi = y
+    if r <= r0 + 1e-10:
+        return [0.0, 0.0]
+    Ph, bval = Phi_your_model(r), b_your_model(r)
+    inside = (1.0 - bval / r) * (np.exp(-2.0 * Ph) - (btilde ** 2) / (r ** 2))
+    drdl = -np.sqrt(max(0, inside))
+    dphidl = btilde / (r ** 2)
+    return [drdl, dphidl]
+
+def event_turning_point(lmbda, y, btilde):
+    r = y[0]
+    return np.exp(-2.0 * Phi_your_model(r)) - (btilde ** 2) / (r ** 2)
+
+event_turning_point.terminal = True
+event_turning_point.direction = -1
+
+def trace_fan(btilde):
+    b_crit = r0 / np.exp(Phi_your_model(r0))
+    sol = solve_ivp(
+        geodesic_rhs,
+        [0, 1e4],
+        [r_max, 0.0],
+        args=(btilde,),
+        events=event_turning_point,
+        rtol=1e-8
+    )
+    r_in, phi_in = sol.y[0], sol.y[1]
+    if r_in[-1] <= r0 + 1e-5 or btilde < b_crit:
+        return r_in, phi_in, 'black'
+    else:
+        phi_exit = 2 * phi_in[-1] - phi_in[::-1]
+        return (
+            np.concatenate([r_in, r_in[::-1]]),
+            np.concatenate([phi_in, phi_exit]),
+            'red'
+        )
+
+plt.figure(figsize=(10, 10))
+b_span = np.linspace(0.1, 10.0, 50)
+
+for b in b_span:
+    r_p, phi_p, color = trace_fan(b)
+    plt.plot(
+        r_p * np.cos(phi_p),
+        r_p * np.sin(phi_p),
+        color=color,
+        alpha=0.6,
+        lw=1
+    )
+
+ang = np.linspace(0, 2*np.pi, 200)
+plt.plot(r0*np.cos(ang), r0*np.sin(ang), 'p-', color='purple', lw=3, label="Throat")
+plt.xlim(-10, 10)
+plt.ylim(-10, 10)
+plt.gca().set_aspect('equal')
+plt.title("Ray Tracing of a static NFW wormhole")
+plt.grid(alpha=0.2)
+plt.show()
